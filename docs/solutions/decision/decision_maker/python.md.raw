@@ -1,0 +1,275 @@
+* [Home](https://developers.google.com/)
+* [Products](https://developers.google.com/products)
+* [Google AI Edge](https://developers.google.com/edge)
+* [MediaPipe](https://developers.google.com/edge/mediapipe/solutions/guide)
+
+Send feedback
+
+# Decision maker guide for Python Stay organized with collections Save and categorize content based on your preferences.
+
+
+
+The MediaPipe Decision Maker task Python API
+(`mediapipe.tasks.python.decision.decision_maker`) provides high-level
+abstractions for defining structured decision questions, prewarming static
+options, executing multi-context batching, and performing Retrieval Augmented
+Generation (RAG) candidate reranking. These instructions show you how to use the
+Decision Maker with Python.
+
+For more information about the capabilities, models, and configuration options
+of this task, see the [Overview](https://developers.google.com/edge/mediapipe/solutions/decision/decision_maker/index).
+
+## Code example
+
+First, construct `ChoiceQuestion`, `BooleanQuestion`, and `ScoreQuestion`
+objects:
+
+```devsite-click-to-copy
+from mediapipe.tasks.python.core import base_options
+from mediapipe.tasks.python.decision import decision_maker
+
+# 1. Define structured questions (ChoiceQuestion, BooleanQuestion, ScoreQuestion)
+intent_q = decision_maker.ChoiceQuestion(
+    instructions="Route the customer message to the appropriate support queue.",
+    criteria={
+        "billing_refund": "Disputed charges, refund requests, or invoice errors.",
+        "technical_bug": "App crashes, login failures, or broken device sync.",
+        "account_cancel": "Requests to close the account or cancel a subscription.",
+        "none": "General chitchat or out-of-scope inquiry.",
+    },
+    normalize_prior=True,
+)
+
+urgent_q = decision_maker.BooleanQuestion(
+    condition="The user is locked out of their account or experiencing double billing.",
+    threshold=0.5,
+    normalize_prior=True,
+)
+
+frustration_q = decision_maker.ScoreQuestion(
+    instructions="Rate the user's frustration level.",
+    rubric=[
+        "Calm, polite inquiry",
+        "Slightly annoyed or impatient",
+        "Highly frustrated, angry, or threatening churn",
+    ],
+)
+
+# 2. Initialize DecisionMaker and prewarm static option embeddings once
+options = decision_maker.DecisionMakerOptions(
+    base_options=base_options.BaseOptions(
+        model_asset_path="embeddinggemma-2-270m-it.litertlm"
+    ),
+    max_num_tokens=512,
+)
+
+with decision_maker.DecisionMaker.create_from_options(options) as maker:
+  maker.prewarm_choice(intent_q)
+
+  query = "Your app crashed twice during checkout and billed my card twice!"
+
+  # 3a. Evaluate individual questions
+  choice_res = maker.evaluate_choice(query, intent_q)
+  bool_res = maker.evaluate_boolean(query, urgent_q)
+  score_res = maker.evaluate_score(query, frustration_q)
+
+  print(f"Intent: {choice_res.selected_key} (conf={choice_res.confidence:.2f})")
+  print(f"90% Conformal Set: {choice_res.prediction_set}")
+  print(f"Urgent: {bool_res.value} (p_true={bool_res.probability_true:.2f})")
+  print(f"Frustration Score: {score_res.expected_score:.2f} (level={score_res.selected_key})")
+
+  # 3b. Multi-Context Batch and Shared-Prefix Candidate Reranking
+  schema = {"intent": intent_q, "urgent": urgent_q, "frustration": frustration_q}
+  batch_results = maker.evaluate_batch(
+      contexts=["Where is my refund?", "App crashes on launch"],
+      questions=schema,
+  )
+  rerank_results = maker.evaluate_candidates(
+      shared_context="User Query: How do I reset my 2FA hardware key?",
+      candidates=[
+          "Doc 1: Resetting two-factor security keys in Account Settings.",
+          "Doc 2: Updating your billing address and payment card.",
+      ],
+      questions={"is_relevant": decision_maker.BooleanQuestion(condition="The document answers the user query.")},
+  )
+```
+
+## Setup
+
+This section describes key steps for setting up your development environment and
+code projects specifically to use Decision Maker. For general information on
+setting up your development environment for using MediaPipe tasks, including
+platform version requirements, see the [Setup guide for
+Python](/mediapipe/solutions/setup_python).
+
+### Development dependencies
+
+Install the MediaPipe Python package:
+
+```devsite-click-to-copy
+pip install mediapipe
+```
+
+### Module imports
+
+Import the module dependencies:
+
+```devsite-click-to-copy
+from mediapipe.tasks.python.core import base_options
+from mediapipe.tasks.python.decision import decision_maker
+```
+
+## Models
+
+Download `embeddinggemma-2-270m-it.litertlm` and specify its path.
+
+## Create the task
+
+Initialize `DecisionMaker` as a context manager or instance:
+
+```devsite-click-to-copy
+options = decision_maker.DecisionMakerOptions(
+    base_options=base_options.BaseOptions(
+        model_asset_path="embeddinggemma-2-270m-it.litertlm"
+    ),
+    max_num_tokens=512,
+)
+
+maker = decision_maker.DecisionMaker.create_from_options(options)
+```
+
+### Prewarm options
+
+Prewarm decision schemas before processing queries:
+
+```devsite-click-to-copy
+intent_q = decision_maker.ChoiceQuestion(
+    instructions="Route customer inquiry.",
+    criteria={
+        "refund": "Refund requests and billing disputes.",
+        "bug": "App crashes and technical issues.",
+        "general": "General product questions."
+    },
+    normalize_prior=True
+)
+
+maker.prewarm_choice(intent_q)
+```
+
+## Prepare data
+
+Specify the input context string or multimodal image or audio object:
+
+```devsite-click-to-copy
+context_text = "I received a double charge on my account this morning."
+```
+
+## Run the task
+
+Run individual questions or schema batches:
+
+```devsite-click-to-copy
+# Single evaluation
+res = maker.evaluate_choice(context_text, intent_q)
+
+# Batch evaluation across contexts
+batch_res = maker.evaluate_batch(
+    contexts=["Double charge error", "App crashes on start"],
+    questions={"intent": intent_q}
+)
+```
+
+## Handle and display results
+
+The following shows an example of the output data from this task:
+
+```devsite-click-to-copy
+// BooleanResult
+value: true
+probabilityTrue: 0.942
+confidence: 0.884
+
+// ChoiceResult
+selectedKey: "lights_control"
+probabilities: ["lights_control": 0.912, "thermostat": 0.051, "security_check": 0.037]
+confidence: 0.861
+
+// ScoreResult
+selectedKey: "Routine preference adjustment"
+expectedScore: 0.18
+levelProbabilities: [0.82, 0.15, 0.03]
+confidence: 0.79
+```
+
+Process output values and conformal sets:
+
+```devsite-click-to-copy
+print(f"Selected Key: {res.selected_key}")
+print(f"Confidence: {res.confidence:.4f}")
+print(f"90% Prediction Set: {res.prediction_set}")
+```
+
+## Batch evaluation and RAG candidate reranking
+
+Python SDK provides specialized methods for multi-context processing and
+zero-overhead candidate reranking:
+
+### Multi-context batching
+
+Evaluate multiple input contexts (`evaluate_batch`) against a shared dictionary
+schema in parallel:
+
+```devsite-click-to-copy
+schema = {
+    "intent": intent_q,
+    "urgent": urgent_q,
+    "frustration": frustration_q,
+}
+
+batch_results = maker.evaluate_batch(
+    contexts=[
+        "Where is my refund?",
+        "App crashes on launch"
+    ],
+    questions=schema,
+)
+```
+
+### Shared-prefix candidate reranking
+
+Rerank multiple retrieval candidates (`evaluate_candidates`) against a shared
+query prefix without re-encoding the query prefix:
+
+```devsite-click-to-copy
+rerank_results = maker.evaluate_candidates(
+    shared_context="User Query: How do I reset my 2FA hardware key?",
+    candidates=[
+        "Doc 1: Resetting two-factor security keys in Account Settings.",
+        "Doc 2: Updating your billing address and payment card.",
+    ],
+    questions={
+        "is_relevant": decision_maker.BooleanQuestion(
+            condition="The document answers the user query."
+        )
+    },
+)
+```
+
+## API summary reference
+
+| Python Function / Method | Description |
+| --- | --- |
+| `decision_maker.DecisionMaker.create_from_options(options)` | Context-manager constructor for `DecisionMaker`. |
+| `maker.prewarm_choice(question)` | Embeds, whitens, and normalizes candidate options. |
+| `maker.evaluate_choice(query, question)` | Evaluates choice primitive; returns `selected_key`, `probabilities`, `prediction_set`. |
+| `maker.evaluate_boolean(query, question)` | Evaluates binary condition; returns `value`, `probability_true`, `confidence`. |
+| `maker.evaluate_score(query, question)` | Evaluates qualitative rubric; returns continuous `expected_score`. |
+| `maker.evaluate_batch(contexts, questions)` | Evaluates multiple input texts against a question schema. |
+| `maker.evaluate_candidates(...)` | Performs shared-prefix RAG candidate reranking. |
+
+
+
+
+
+
+Send feedback

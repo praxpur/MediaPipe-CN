@@ -1,0 +1,223 @@
+* [Home](https://developers.google.com/)
+* [Products](https://developers.google.com/products)
+* [Google AI Edge](https://developers.google.com/edge)
+* [MediaPipe](https://developers.google.com/edge/mediapipe/solutions/guide)
+
+Send feedback
+
+# Decision maker guide Stay organized with collections Save and categorize content based on your preferences.
+
+
+
+The MediaPipe Decision Maker task evaluates structured decision questions—such as
+categorical choices, boolean conditions, and rubric scores—as a deterministic,
+calibrated, zero-decoding decision engine, powered by a variety of lightweight
+models capable of running on-device, including *EmbeddingGemma 1 and 2*,
+*bidirectional cross-encoders* (Laya, GLiNER2.5-Decide), and *generative Gemma
+4*.
+
+Instead of generating free-form text or fragile JSON tokens through
+computationally expensive autoregressive decoding, MediaPipe Decision Maker task evaluates
+structured decision questions in a *single forward pass*. MediaPipe Decision Maker task
+returns calibrated probabilities, winning labels, and continuous expected scores
+with minimal runtime overhead.
+
+[Try it!arrow\_forward](https://google-ai-edge.github.io/mediapipe-samples-web/#/decision/decision_maker)
+
+## Get Started
+
+Start using this task by following one of these implementation guides for your
+target platform. These platform-specific guides walk you through a basic
+implementation of this task, including a recommended model, and code example
+with recommended configuration options:
+
+| Platform | Code Example | Guide |
+| --- | --- | --- |
+| Android | [Code example](https://github.com/google-ai-edge/mediapipe-samples/tree/main/examples/decision_maker/android) | [Guide](https://developers.google.com/edge/mediapipe/solutions/decision/decision_maker/android) |
+| iOS | [Code example](https://github.com/google-ai-edge/mediapipe-samples/tree/main/examples/decision_maker/ios) | [Guide](https://developers.google.com/edge/mediapipe/solutions/decision/decision_maker/ios) |
+| Python | [Colab](https://github.com/google-ai-edge/mediapipe-samples/blob/main/examples/decision_maker/python/decision_maker.ipynb) | [Guide](https://developers.google.com/edge/mediapipe/solutions/decision/decision_maker/python) |
+| Web | [Code example](https://github.com/google-ai-edge/mediapipe-samples-web/blob/main/src/tasks/decision-maker.ts) | [Guide](https://developers.google.com/edge/mediapipe/solutions/decision/decision_maker/web_js) |
+
+## Task details
+
+This section describes the capabilities, inputs, outputs, and configuration
+options of this task.
+
+### Features
+
+* **Zero-decoding decision inference**: Eliminates token generation latency by
+  scoring structured decision primitives directly from model representations.
+* **Multimodal support**: Accepts UTF-8 text, RGB images (`MPImage`, JPEG/PNG
+  bytes), and 16kHz audio samples in both the input context and decision
+  options.
+* **First-class JSON integration**: Built-in JSON parsing utilities evaluate
+  TypeSafe Jev JSON payloads and OpenAI `json_schema` specifications without
+  custom adapter code.
+* **Cross-platform consistency**: Uniform API architecture available across
+  Android (Kotlin), iOS (Swift), Python, and Web (TypeScript/JavaScript).
+
+### Input and output formats
+
+* **Input Context**: Multimodal state containing text, image, or audio clips.
+* **Question Primitives**:
+  + `ChoiceQuestion`: Multi-class categorical decision among K options.
+  + `BooleanQuestion`: Binary condition validation (True / False or Yes /
+    No).
+  + `ScoreQuestion`: Ordinal rubric grading with automated expected score
+    calculation.
+* **Outputs**: Winning key, option probabilities, boolean value, and expected
+  continuous score.
+
+### Supported model backends
+
+| Model Backend | Architecture | Typical Latency | Key Strengths |
+| --- | --- | --- | --- |
+| **EmbeddingGemma 1 & 2** | Bi-Encoder (270M / 300M) | Ultra-low latency | High throughput, multi-span LogSumExp document pooling, 0 MB extra RAM using `UniversalEmbedder`. |
+| **Gemma 4 E2B & E4B** | Autoregressive Decoder (2B / 4B) | Single Prefill Pass | Complex compositional logic, counterfactual policy exceptions. |
+| **Laya & GLiNER2.5-Decide** | Cross-Encoder (149M / 166M) | Single Cross-Attention Pass | Joint context-label attention. |
+
+### Configurations options
+
+This task has the following configuration options:
+
+| Option Name | Description | Value Type | Default Value |
+| --- | --- | --- | --- |
+| `modelSource` | The source of the model asset, specified with a path (`.filePath`) or in-memory data (`.data`). | `ModelSource` | `undefined` |
+| `maxNumTokens` | The maximum number of tokens allowed for input context processing. | `Int` | `4096` |
+| `delegate` | The hardware acceleration delegate used for running inference (`.cpu`, `.gpu`). | `Delegate` | `.cpu` |
+
+## Models
+
+DecisionMaker operates on a three-step execution lifecycle designed to optimize
+latency and memory:
+
+1. *Create (`DecisionMaker`)*: Initialize the decision engine from a model
+   path, file descriptor, or buffer. Existing `UniversalEmbedder` providers can
+   also be shared to achieve 0 MB extra RAM consumption.
+2. *Prewarm (`prewarm` / `Prewarm` / `prewarmJson`)*: Executed once during
+   setup. For embedding backends, it computes candidate option embeddings,
+   performs within-question centroid whitening, and L2-normalizes vector
+   representations. For logit backends, it pre-populates KV cache prefixes.
+3. *Evaluate (`evaluate` / `Evaluate` / `evaluateJson`)*: Executed per request.
+   Scores context queries against cached decision structures in a single pass,
+   returning structured results with ultra-low latency per question on CPU.
+
+| Model name | Input shape | Quantization type | Model Card | Versions |
+| --- | --- | --- | --- | --- |
+| [embedding\_gemma2](https://huggingface.co/litert-community/embeddinggemma-2-text-270m-litert-lm/resolve/main/embeddinggemma-2-text-270m.litertlm) | string, one of `{string, Dict[string, string], List[string]}` | float 16 | [info](https://huggingface.co/litert-community/embeddinggemma-2-text-270m-litert-lm) | [Latest](https://huggingface.co/litert-community/embeddinggemma-2-text-270m-litert-lm) |
+| [embedding\_gemma2\_text\_vision](https://huggingface.co/litert-community/embeddinggemma-2-text-vision-440m-litert-lm/resolve/main/embeddinggemma-2-text-vision-440m.litertlm) | string, one of `{string, Dict[string, string], List[string]}` | float 16 | [info](https://huggingface.co/litert-community/embeddinggemma-2-text-vision-440m-litert-lm) | [Latest](https://huggingface.co/litert-community/embeddinggemma-2-text-vision-440m-litert-lm) |
+| [embedding\_gemma1](https://storage.googleapis.com/mediapipe-models/text_embedder/embedding_gemma/int4int8/latest/embedding_gemma.task) | string, one of `{string, Dict[string, string], List[string]}` | Mixed Precision (int4+int8) | [info](https://huggingface.co/litert-community/embeddinggemma-300m) | [Latest](https://storage.googleapis.com/mediapipe-models/text_embedder/embedding_gemma/int4int8/latest/embedding_gemma.task) |
+| [Gemma E2B](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) | string, one of `{string, Dict[string, string], List[string]}` | int4 | [info](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) | [Latest](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) |
+| [Gemma E4B](https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm) | string, one of `{string, Dict[string, string], List[string]}` | int4 | [info](https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm) | [Latest](https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm) |
+| [laya\_s256](https://storage.googleapis.com/mediapipe-models/decision_maker/laya/float32/laya_s256/latest/laya_s256.task) | string, one of `{string, Dict[string, string], List[string]}` | float 32 | [info](https://huggingface.co/litert-community/laya-LiteRT) | [Latest](https://storage.googleapis.com/mediapipe-models/decision_maker/laya/float32/laya_s256/latest/laya_s256.task) |
+| [laya\_s512](https://storage.googleapis.com/mediapipe-models/decision_maker/laya/float32/laya_s512/latest/laya_s512.task) | string, one of `{string, Dict[string, string], List[string]}` | float 32 | [info](https://huggingface.co/litert-community/laya-LiteRT) | [Latest](https://storage.googleapis.com/mediapipe-models/decision_maker/laya/float32/laya_s512/latest/laya_s512.task) |
+| [gliner\_s256](https://storage.googleapis.com/mediapipe-models/decision_maker/gliner/float16/gliner_s256/latest/gliner_s256.task) | string, one of `{string, Dict[string, string], List[string]}` | float 16 | [info](https://huggingface.co/litert-community/GLiNER2.5-Decide-LiteRT) | [Latest](https://storage.googleapis.com/mediapipe-models/decision_maker/gliner/float16/gliner_s256/latest/gliner_s256.task) |
+| [gliner\_s512](https://storage.googleapis.com/mediapipe-models/decision_maker/gliner/float16/gliner_s512/latest/gliner_s512.task) | string, one of `{string, Dict[string, string], List[string]}` | float 16 | [info](https://huggingface.co/litert-community/GLiNER2.5-Decide-LiteRT) | [Latest](https://storage.googleapis.com/mediapipe-models/decision_maker/gliner/float16/gliner_s512/latest/gliner_s512.task) |
+
+## Decision primitives
+
+All decision tasks in MediaPipe DecisionMaker are composed of three fundamental
+decision question primitives:
+
+| Primitive | Prototype / Class | Description | Key Output Fields |
+| --- | --- | --- | --- |
+| *Boolean* | `BooleanQuestion` | Evaluates whether a natural-language condition holds against the context. | `value` / `is_satisfied` (bool) `probability_true` (0.0 to 1.0) `confidence` |
+| *Choice* | `ChoiceQuestion` | Selects 1 of K mutually exclusive candidate options. | `selected_key` `probabilities` (map of keys to probabilities) `confidence` |
+| *Score* | `ScoreQuestion` | Evaluates an ordered K-level rubric from lowest to highest grade. | `expected_score` `selected_key` `probabilities` `confidence` |
+
+### 1. BooleanQuestion
+
+Evaluates binary conditions against the context using a configurable threshold
+(default: `0.5`).
+
+* *`value` / `is_satisfied`*: `true` if `probability_true` is greater than or
+  equal to `threshold`.
+* *`probability_true`*: Calibrated probability value from `0.0` to `1.0`.
+* *`confidence`*: Certainty score relative to the threshold boundary.
+
+### 2. ChoiceQuestion
+
+Evaluates K candidate options defined by text descriptions, images, or audio
+samples.
+
+* *`selected_key`*: Winning option key with the highest probability.
+* *`probabilities`*: Normalized probability distribution summing to `1.0`
+  across all candidate keys.
+* **`confidence`**: Normalized certainty derived from margin and entropy.
+
+### 3. ScoreQuestion
+
+Evaluates an ordered qualitative rubric of K levels representing increasing
+severity or quality.
+
+* *`expected_score`*: Continuous probability-weighted expected score across
+  the rubric levels.
+* *`selected_key`*: Key or index of the highest probability level.
+* *`probabilities`*: Full probability distribution over rubric levels.
+
+## MediaPipe Decision Maker task migration and platform comparison
+
+This section details how MediaPipe Decision Maker task compares to cloud alternatives, such
+as OpenAI Structured Outputs and server-side Jev APIs.
+
+### Architectural comparison table
+
+| Dimension | MediaPipe DecisionMaker | TypeSafe Jev API | OpenAI Structured Outputs API |
+| --- | --- | --- | --- |
+| *Execution Target* | *On-Device Edge* (Android, iOS, WebGPU/Wasm, Desktop, Python) | *Server / Cloud / Python Harness* (Vertex AI, Gemini API) | *Cloud HTTP API* (`/v1/chat/completions`, `json_schema`) |
+| *Underlying Engine* | *Multi-Backend Engine*: 1. Bi-Encoder (EmbeddingGemma 1 & 2) 2. Cross-Encoder (Laya, GLiNER2.5) 3. Single-pass Logits (Gemma 4) | *Prompted Generative Logits* (`Jev-Gemma`) or *Bi-Encoder Dot-Product* (`Jev-Embed`) | *Autoregressive Constrained Decoding* (FSM token masking over JSON Schema) |
+| *Core Primitives* | `ChoiceQuestion`, `BooleanQuestion`, `ScoreQuestion` | `choice`, `noul` (boolean), `score` | Arbitrary JSON Schema (`enum`, `boolean`, `number`), no built-in expected value calculation |
+| *Option Caching (`Prewarm`)* | *Explicit `Prewarm()` API*: Embeds and whitens all K options once up front; runtime executes *one query forward pass* (`O(1)` in K). | Re-evaluates prompt or option embeddings per request unless manually cached. | Server-side automatic prefix caching only (still executes token decoding). |
+| *Multimodal Support* | *Built-in for Context AND Options*: Accepts text, `MPImage`/JPEG/PNG, and 16kHz audio in inputs and candidates. | Text / JSON state only (`state: dict | str`). | Multimodal in input prompt, *text-only* in output schema options. |
+| *Latency and Memory* | *Ultra-low latency* per question on CPU, *157 MB* bundle (*0 MB extra RAM* sharing `UniversalEmbedder`). | Network RTT or uncached Python GPU inference. | Network RTT, billed per input and output token. |
+
+### Built-in JSON support
+
+Both TypeSafe Jev JSON payloads and OpenAI `json_schema` definitions are parsed
+directly by `DecisionMaker` (`evaluateJson` and `prewarmJson`) with **zero
+custom adapter code required**.
+
+#### 1. Built-in Jev JSON payload format (`evaluateJson`)
+
+Evaluate unmodified Jev payloads (`"state"` + `"questions"`):
+
+```devsite-click-to-copy
+{
+  "state": "Cancel my flight and refund my credit card immediately.",
+  "questions": {
+    "intent": {
+      "type": "choice",
+      "instructions": "Determine the user's primary travel intent.",
+      "normalize_prior": true,
+      "criteria": {
+        "book_flight": "Search or book a new flight itinerary.",
+        "cancel_refund": "Cancel an existing reservation and request a refund.",
+        "baggage_claim": "Report lost or delayed luggage."
+      }
+    },
+    "is_financial": {
+      "type": "noul",
+      "condition": "The request involves a payment, charge, or refund.",
+      "threshold": 0.5
+    }
+  }
+}
+```
+
+#### 2. Built-in OpenAI `json_schema` property mapping
+
+`DecisionMaker` automatically maps standard OpenAI `json_schema` property
+objects onto included DecisionMaker decision primitives:
+
+| OpenAI JSON Schema Property | DecisionMaker Primitive Mapping | Key Advantage Over OpenAI |
+| --- | --- | --- |
+| `{"type": "string", "enum": [...], "description": "..."}` | `ChoiceQuestion(instructions=description, choices=enum)` | Evaluates calibrated probabilities for **every** enum value in 1 non-generative pass. |
+| `{"type": "boolean", "description": "..."}` | `BooleanQuestion(condition=description)` | Calibrated probability of True with customizable decision threshold. |
+| `{"type": "integer", "minimum": 1, "maximum": 5, "description": "..."}` | `ScoreQuestion(instructions=description, choices=["1".."5"])` | Calculates continuous expected score rather than quantized integer. |
+
+
+
+
+
+
+Send feedback

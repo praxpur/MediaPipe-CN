@@ -1,0 +1,397 @@
+* [Home](https://developers.google.com/)
+* [Products](https://developers.google.com/products)
+* [Google AI Edge](https://developers.google.com/edge)
+* [MediaPipe](https://developers.google.com/edge/mediapipe/solutions/guide)
+
+Send feedback
+
+# Decision maker guide for Android Stay organized with collections Save and categorize content based on your preferences.
+
+
+
+The MediaPipe Decision Maker task Android API provides a Kotlin-first SDK
+(`com.google.mediapipe.tasks.decision`) for executing on-device decision
+questions using foundation models like EmbeddingGemma on Android devices.
+
+For more information about the capabilities, models, and configuration options
+of this task, see the [Overview](https://developers.google.com/edge/mediapipe/solutions/decision/decision_maker/index).
+
+## Code example
+
+The Android Kotlin SDK (`com.google.mediapipe.tasks.decision`) provides the
+`DecisionMakerOptions.decisionMakerOptions { ... }` DSL, `BooleanQuestion`,
+`ChoiceQuestion` (with `ChoiceQuestion.withDescriptions(...)`), `ScoreQuestion`,
+multimodal `DecisionContext`, batch evaluation, and built-in JSON schema
+evaluation (`prewarmJson` / `evaluateJson`):
+
+```devsite-click-to-copy
+package com.example.ondevicedecision
+
+import android.content.Context
+import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.decision.DecisionMaker
+import com.google.mediapipe.tasks.decision.DecisionMakerOptions
+import com.google.mediapipe.tasks.decision.DecisionMakerDelegate
+import com.google.mediapipe.tasks.decision.BooleanQuestion
+import com.google.mediapipe.tasks.decision.ChoiceQuestion
+import com.google.mediapipe.tasks.decision.ScoreQuestion
+import com.google.mediapipe.tasks.decision.DecisionContext
+
+class OnDeviceRouter(context: Context) : AutoCloseable {
+
+  // 1. Configure DecisionMakerOptions with Kotlin DSL (supports asset path, FileDescriptor, or DirectByteBuffer)
+  private val options = decisionMakerOptions {
+    modelPath = "embeddinggemma-2-270m-it.litertlm"
+    maxNumTokens = 512
+    delegate = DecisionMakerDelegate.CPU
+  }
+
+  private val decisionMaker = DecisionMaker.createFromOptions(context, options)
+
+  // 2. Define typed questions & prewarm option embeddings once
+  private val toolQuestion = ChoiceQuestion.withDescriptions(
+    options = mapOf(
+      "set_alarm" to "Set a wake-up alarm or countdown timer.",
+      "send_message" to "Send an SMS or chat message to a contact.",
+      "capture_note" to "Save a memo, shopping item, or voice note.",
+      "none" to "No tool needed; answer conversationally.",
+    ),
+    instructions = "Select the on-device tool to invoke for the user request.",
+    normalizePrior = true,
+  )
+
+  private val urgentQuestion = BooleanQuestion(
+    condition = "The request specifies an immediate deadline or urgent reminder.",
+    threshold = 0.5f,
+    normalizePrior = true,
+  )
+
+  private val clarityQuestion = ScoreQuestion(
+    rubric = listOf(
+      "Vague or missing required parameters",
+      "Partially specified parameters",
+      "Fully specified with clear parameters",
+    ),
+    instructions = "How explicitly does the user state the required tool parameters?",
+  )
+
+  init {
+    decisionMaker.prewarm(toolQuestion)
+  }
+
+  // 3a. Evaluate typed questions directly
+  fun routeUtterance(userText: String) {
+    val action = decisionMaker.evaluate(userText, toolQuestion)
+    val urgent = decisionMaker.evaluate(userText, urgentQuestion)
+    val clarity = decisionMaker.evaluate(userText, clarityQuestion)
+
+    println("Tool: ${action.selectedKey} (p=${action.probabilities[action.selectedKey]}, conf=${action.confidence})")
+    println("Urgent: ${urgent.value} (pTrue=${urgent.probabilityTrue})")
+    println("Clarity [0..1]: ${clarity.expectedScore} (level=${clarity.selectedKey})")
+  }
+
+  // 3b. Multimodal DecisionContext + Multi-Question JSON Evaluation in a single call
+  fun routeMultimodal(userText: String, jpegBytes: ByteArray) {
+    val ctx = DecisionContext(text = userText, imageBytes = jpegBytes)
+    val jsonResponse = decisionMaker.evaluateJson(
+      context = ctx,
+      jsonQuestions = """
+        {
+          "questions": {
+            "screen_issue": {
+              "type": "choice",
+              "instructions": "Classify the hardware issue visible in the photo.",
+              "criteria": {
+                "cracked_screen": "Physical glass crack or shattered OLED panel.",
+                "water_damage": "Liquid corrosion or condensation."
+              }
+            }
+          }
+        }
+      """.trimIndent(),
+    )
+    println("Multimodal JSON Result: $jsonResponse")
+  }
+
+  override fun close() = decisionMaker.close()
+}
+```
+
+## Setup
+
+Place your `.litertlm` or `.tflite` model file (e.g.,
+`embeddinggemma-2-270m-it.litertlm`) inside your project's
+`app/src/main/assets/` directory.
+
+### Dependencies
+
+Decision Maker uses the `com.google.mediapipe:tasks-decision` library. Add this
+dependency to the `build.gradle` file of your Android app development project.
+Import the required dependencies with the following code:
+
+```devsite-click-to-copy
+dependencies {
+    ...
+    implementation 'com.google.mediapipe:tasks-decision:latest.release'
+}
+```
+
+### Model
+
+The MediaPipe Decision Maker task requires a trained model that is compatible with this
+task. For more information on available trained models for Decision Maker, see
+the task overview [Models section](https://developers.google.com/edge/mediapipe/solutions/decision/decision_maker/index#models).
+
+Download the recommended model asset and place it in your Android app's
+`assets/` directory:
+
+* **EmbeddingGemma 2 (270M)**: `embeddinggemma-2-270m-it.litertlm`
+
+Select and download the model, and then store it within your project directory:
+
+```devsite-click-to-copy
+<dev-project-root>/src/main/assets
+```
+
+Specify the path of the model within the `ModelName` parameter.
+
+## Create the task
+
+Configure `DecisionMakerOptions` using `BaseOptions` and instantiate
+`DecisionMaker`:
+
+```devsite-click-to-copy
+val baseOptions = BaseOptions.builder()
+    .setModelAssetPath("embeddinggemma-2-270m-it.litertlm")
+    .build()
+
+val options = DecisionMakerOptions.builder()
+    .setBaseOptions(baseOptions)
+    .setMaxNumTokens(512)
+    .build()
+
+val decisionMaker = DecisionMaker.createFromOptions(context, options)
+```
+
+### Prewarm options
+
+Prewarm static candidate questions during setup to eliminate runtime encoding
+overhead:
+
+```devsite-click-to-copy
+val intentQuestion = ChoiceQuestion.builder()
+    .setInstructions("Route customer inquiry to the appropriate queue.")
+    .setCriteria(mapOf(
+        "billing_refund" to "Disputed charges, refund requests, or invoice errors.",
+        "technical_bug" to "App crashes, login failures, or sync issues.",
+        "account_cancel" to "Account closure or subscription cancellation."
+    ))
+    .setNormalizePrior(true)
+    .build()
+
+// Prewarm candidates in memory
+decisionMaker.prewarmChoice(intentQuestion)
+```
+
+## Prepare data
+
+Construct a `DecisionContext` containing text, image, or multimodal inputs:
+
+```devsite-click-to-copy
+val inputContext = DecisionContext.builder()
+    .setText("App crashes immediately after logging in on Android 14.")
+    .build()
+```
+
+## Run the task
+
+Execute evaluation synchronously using `evaluateChoice`, `evaluateBoolean`, or
+`evaluateScore`:
+
+```devsite-click-to-copy
+val choiceResult = decisionMaker.evaluateChoice(inputContext, intentQuestion)
+
+val urgentQuestion = BooleanQuestion.builder()
+    .setCondition("The user is blocked from using the application.")
+    .build()
+
+val booleanResult = decisionMaker.evaluateBoolean(inputContext, urgentQuestion)
+```
+
+## Handle and display results
+
+The following shows an example of the output data from this task:
+
+```devsite-click-to-copy
+// BooleanResult
+value: true
+probabilityTrue: 0.942
+confidence: 0.884
+
+// ChoiceResult
+selectedKey: "lights_control"
+probabilities: ["lights_control": 0.912, "thermostat": 0.051, "security_check": 0.037]
+confidence: 0.861
+
+// ScoreResult
+selectedKey: "Routine preference adjustment"
+expectedScore: 0.18
+levelProbabilities: [0.82, 0.15, 0.03]
+confidence: 0.79
+```
+
+Inspect predicted categories, probabilities, and 90% conformal prediction sets:
+
+```devsite-click-to-copy
+Log.d("DecisionMaker", "Selected Key: ${choiceResult.selectedKey}")
+Log.d("DecisionMaker", "Confidence: ${choiceResult.confidence}")
+Log.d("DecisionMaker", "Conformal Set: ${choiceResult.predictionSet}")
+
+Log.d("DecisionMaker", "Is Urgent: ${booleanResult.value}")
+Log.d("DecisionMaker", "P(True): ${booleanResult.probabilityTrue}")
+```
+
+## Use
+
+The Android SDK uses a Kotlin DSL for configuration, strongly typed question
+primitives, and support for both direct object evaluation and multi-question
+JSON schemas.
+
+### 1. Initialize options and MediaPipe Decision Maker task
+
+Use `decisionMakerOptions` to configure model path, token limits, and delegate
+acceleration (CPU or GPU):
+
+```devsite-click-to-copy
+import android.content.Context
+import com.google.mediapipe.tasks.decision.BooleanQuestion
+import com.google.mediapipe.tasks.decision.ChoiceQuestion
+import com.google.mediapipe.tasks.decision.DecisionContext
+import com.google.mediapipe.tasks.decision.DecisionMaker
+import com.google.mediapipe.tasks.decision.DecisionMakerDelegate
+import com.google.mediapipe.tasks.decision.DecisionMakerOptions.Companion.decisionMakerOptions
+import com.google.mediapipe.tasks.decision.ScoreQuestion
+
+class OnDeviceRouter(context: Context) : AutoCloseable {
+
+    private val options = decisionMakerOptions {
+        modelPath = "embeddinggemma-2-270m-it.litertlm"
+        maxNumTokens = 512
+        delegate = DecisionMakerDelegate.CPU
+    }
+
+    private val decisionMaker = DecisionMaker.createFromOptions(context, options)
+```
+
+### 2. Define questions and prewarm
+
+Construct `ChoiceQuestion`, `BooleanQuestion`, and `ScoreQuestion` instances.
+Call `prewarm` once during initialization to precompute and whiten option
+embeddings at 0 ms runtime evaluation cost:
+
+```devsite-click-to-copy
+    private val toolQuestion = ChoiceQuestion.withDescriptions(
+        options = mapOf(
+            "set_alarm" to "Set a wake-up alarm or countdown timer.",
+            "send_message" to "Send an SMS or chat message to a contact.",
+            "capture_note" to "Save a memo, shopping item, or voice note.",
+            "none" to "No tool needed; answer conversationally."
+        ),
+        instructions = "Select the on-device tool to invoke for the user request.",
+        normalizePrior = true
+    )
+
+    private val urgentQuestion = BooleanQuestion(
+        condition = "The request specifies an immediate deadline or urgent reminder.",
+        threshold = 0.5f,
+        normalizePrior = true
+    )
+
+    private val clarityQuestion = ScoreQuestion(
+        rubric = listOf(
+            "Vague or missing required parameters",
+            "Partially specified parameters",
+            "Fully specified with clear parameters"
+        ),
+        instructions = "How explicitly does the user state the required tool parameters?"
+    )
+
+    init {
+        // Embeds and whitens candidate options once up front
+        decisionMaker.prewarm(toolQuestion)
+    }
+```
+
+### 3. Evaluate single and typed questions
+
+Pass input text and questions to `evaluate`:
+
+```devsite-click-to-copy
+    fun routeUtterance(userText: String) {
+        val action = decisionMaker.evaluate(userText, toolQuestion)
+        val urgent = decisionMaker.evaluate(userText, urgentQuestion)
+        val clarity = decisionMaker.evaluate(userText, clarityQuestion)
+
+        println("Selected Tool: ${action.selectedKey}")
+        println("Tool Probability: ${action.probabilities[action.selectedKey]}")
+        println("Confidence: ${action.confidence}")
+
+        println("Is Urgent: ${urgent.value} (pTrue=${urgent.probabilityTrue})")
+        println("Clarity Score [0..1]: ${clarity.expectedScore} (Level Key=${clarity.selectedKey})")
+    }
+```
+
+## Multimodal DecisionContext and JSON schemas
+
+The Android SDK supports multimodal context inputs (combining text with JPEG/PNG
+image bytes or audio) and evaluating complex JSON question schemas using
+`evaluateJson`:
+
+```devsite-click-to-copy
+    fun routeMultimodal(userText: String, jpegBytes: ByteArray) {
+        val ctx = DecisionContext(text = userText, imageBytes = jpegBytes)
+
+        val jsonResponse = decisionMaker.evaluateJson(
+            context = ctx,
+            jsonQuestions = """
+            {
+              "questions": {
+                "screen_issue": {
+                  "type": "choice",
+                  "instructions": "Classify the hardware issue visible in the photo.",
+                  "criteria": {
+                    "cracked_screen": "Physical glass crack or shattered OLED panel.",
+                    "water_damage": "Liquid corrosion or condensation."
+                  }
+                }
+              }
+            }
+            """.trimIndent()
+        )
+
+        println("Multimodal JSON Evaluation Result: $jsonResponse")
+    }
+
+    override fun close() {
+        decisionMaker.close()
+    }
+}
+```
+
+## API summary reference
+
+| Method | Description |
+| --- | --- |
+| `DecisionMaker.createFromOptions(context, options)` | Creates a new instance using specified options. |
+| `decisionMaker.prewarm(question)` | Embeds and whitens candidates for a given question. |
+| `decisionMaker.evaluate(text, question)` | Evaluates a single typed question against text context. |
+| `decisionMaker.evaluateBatch(contexts, questions)` | Evaluates multiple contexts across questions in batch. |
+| `decisionMaker.evaluateJson(context, jsonQuestions)` | Automatically parses and evaluates Jev or OpenAI JSON schemas against text/multimodal context. |
+| `decisionMaker.close()` | Releases underlying JNI and model resources. |
+
+
+
+
+
+
+Send feedback

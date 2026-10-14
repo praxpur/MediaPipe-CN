@@ -1,0 +1,281 @@
+* [Home](https://developers.google.com/)
+* [Products](https://developers.google.com/products)
+* [Google AI Edge](https://developers.google.com/edge)
+* [MediaPipe](https://developers.google.com/edge/mediapipe/solutions/guide)
+
+Send feedback
+
+# Prompting and schema design best practices for MediaPipe Decision Maker task Stay organized with collections Save and categorize content based on your preferences.
+
+
+
+This guide outlines best practices for designing schemas, writing prompts, and
+configuring parameters in **MediaPipe Decision Maker task**.
+
+DecisionMaker provides a unified API (`BooleanQuestion`, `ChoiceQuestion`,
+`ScoreQuestion`) across three distinct model architectures:
+
+1. **Bi-Encoders** (*EmbeddingGemma 1 & 2*)
+2. **Autoregressive Generative Models** (*Gemma 4 E2B & E4B*)
+3. **Bidirectional Cross-Encoders** (*Laya, GLiNER2.5-Decide*)
+
+Because scoring mechanics vary across these model families, following these
+guidelines ensures maximum accuracy, lower latency, and calibrated predictions.
+
+---
+
+## 1. Quick Reference: Do's and Don'ts
+
+| Design Dimension | Do (Recommended) | Don't (Avoid) | Why It Matters |
+| --- | --- | --- | --- |
+| **Option Descriptions** (*Choice* & *Score*) | Provide rich, self-contained semantic descriptions for every key (e.g., `"billing_refund": "Disputed charges, refund requests, or invoice errors"`). | Avoid passing bare opaque keys (`"0"`, `"1"`, `"cat_a"`) with empty descriptions or repeated boilerplate. | Bi-encoders project options into metric space; distinct semantic phrases maximize separation between options. |
+| **Boolean Conditions** (*Boolean*) | Phrase conditions as single, affirmative, testable propositions (e.g., `"The customer is requesting a refund or billing credit"`). | Avoid using double negations (`"The request is NOT ineligible"`) or compound `"A unless B"` exceptions inside a single string. | Affirmative propositions align cleanly with internal hypothesis templates across all model backends. |
+| **Prior Normalization** (`normalize_prior`) | Enable `normalize_prior = True` when option descriptions vary significantly in length, specificity, or frequency. | Avoid leaving `normalize_prior = False` when one catch-all option is much broader or more generic than others. | Subtracts the null-context baseline score (0 ms cost when prewarmed) so generic labels don't dominate borderline inputs. |
+| **Temperature Calibration** (`temperature`) | Leave `temperature = 0.0` (default) to use auto-calibrated temperatures (approximately 0.045 for EmbeddingGemma, 1.0 for Gemma 4 / Laya). | Avoid hardcoding `temperature = 1.0` on EmbeddingGemma unless unscaled cosine probabilities are specifically required. | Raw cosine similarities live in a narrow -0.15 to +0.35 band. Default `T = 1.0` yields near-uniform probabilities (ECE > 0.30), while auto-calibrated `T = 0.045` achieves ECE = 0.048. |
+| **3-Way Verification & Abstention** | Use standard keys (`"supported"`, `"contradicted"`, `"insufficient"`) with distinct evidence descriptions. | Avoid mixing multiple overlapping "unsure" / "maybe" options in the same question without clear definitions. | The compiler recognizes 3-way verification schemas, handles neutral centroid subtraction, and prevents decision bias. |
+| **Static vs. Dynamic Schemas** | Call `prewarm()` once at startup for static or repeatedly evaluated schemas. | Avoid re-compiling or omitting `prewarm()` on hot loops with large option sets (10 or more options). | `prewarm()` caches option embeddings (EmbeddingGemma) and KV prefixes (Gemma 4), reducing runtime evaluation to `O(1)` in the number of options. |
+
+---
+
+## 2. Universal Schema Design Rules
+
+Follow these design rules to get the most out of any MediaPipe Decision Maker task model.
+
+### A. Write Self-Contained Option Descriptions
+
+For `ChoiceQuestion` and `ScoreQuestion`, always pair concise keys with clear,
+descriptive strings.
+
+```devsite-click-to-copy
+# GOOD: Rich, distinct semantic descriptions
+support_routing = decision_maker.ChoiceQuestion(
+    criteria={
+        "billing_refund": "Disputed charges, refund requests, invoice errors, or payment failures.",
+        "technical_bug": "App crash, UI freeze, login failure, sync error, or broken functionality.",
+        "feature_request": "Suggestions for new capabilities, UI enhancements, or integrations."
+    }
+)
+
+# AVOID: Bare keys with empty or repetitive descriptions
+bad_routing = decision_maker.ChoiceQuestion(
+    criteria={
+        "option_1": "Option 1",
+        "option_2": "Option 2"
+    }
+)
+```
+
+### B. Phrase Boolean Conditions Affirmatively
+
+Avoid double negatives or tricky condition phrasing. Keep boolean conditions
+affirmative and concise.
+
+```devsite-click-to-copy
+# GOOD: Direct, affirmative condition
+is_vip = decision_maker.BooleanQuestion(
+    condition="The customer holds an active Premium or Enterprise tier subscription."
+)
+
+# AVOID: Double negatives
+is_not_unsubscribed = decision_maker.BooleanQuestion(
+    condition="The user does NOT want to opt out of notifications."
+)
+```
+
+### C. Use Prior Normalization for Unequal Options
+
+When one option is naturally broader than others (e.g., an `"other_general"`
+catch-all category), enable prior normalization. This evaluates the schema
+without context at prewarm time and subtracts the baseline preference at zero
+runtime cost.
+
+```devsite-click-to-copy
+normalized_choice = decision_maker.ChoiceQuestion(
+    criteria={
+        "password_reset": "Specific requests to reset account password or unlock 2FA.",
+        "general_inquiry": "General questions about company policies, business hours, or contact info."
+    },
+    normalize_prior=True
+)
+```
+
+
+
+---
+
+## 3. Model-Specific Optimization Guides
+
+Follow the guide for your chosen model family.
+
+### EmbeddingGemma 1 & 2 (Bi-Encoders)
+
+* **Models**: EmbeddingGemma 2 (270M / Omni), EmbeddingGemma 1 (300M)
+* **Performance**: Ultra-low latency on CPU and GPU
+* **Architecture**: Symmetric bi-encoder embedding context and candidate
+  options into a shared 768D L2-normalized vector space.
+
+#### Best Practices for EmbeddingGemma:
+
+1. **Provide Concrete Exemplars**: Include specific synonyms and keywords in
+   option descriptions (e.g., `"technical_bug": "App crash, freeze, login
+   failure, sync error, or broken UI"`).
+2. **Focus Instructions on the Decision Axis**: Keep optional instructions
+   concise (1 sentence) describing *what dimension* to classify (e.g.,
+   `"Classify the primary intent of the support ticket."`).
+3. **Automatic Long-Context Handling**: For long documents (> 256 tokens, up to
+   2,048 tokens), `DecisionMaker` automatically chunks context into overlapping
+   512-token spans using head-anchored LogSumExp pooling. Placing key metadata
+   near the top of the context takes advantage of the head-span anchor weight
+   (0.35).
+4. **Use Rubric Descriptions with ScoreQuestion**: For ordinal ratings (1–5),
+   populate descriptions for each level. DecisionMaker computes the
+   probability-weighted expected score across levels, yielding smooth
+   continuous scores with higher correlation than discrete argmax picking.
+
+### Gemma 4 (E2B & E4B)
+
+* **Models**: Gemma 4 E2B (2B) & E4B (4B)
+* **Performance**: Evaluates decisions in a **single prefill forward pass**
+  with zero autoregressive token generation.
+
+#### Best Practices for Gemma 4:
+
+1. **Leverage for Complex Policy Rules**: Ideal for tasks involving
+   counterfactual reasoning, multi-rule exceptions, or complex conditional
+   logic where bi-encoders struggle.
+2. **Put Explicit Rules in Instructions**: Place explicit constraints directly
+   in the `instructions` field (e.g., `"Approve refund ONLY IF purchased within
+   14 days; EXCEPT digital downloads which are non-refundable unless
+   unplayed."`).
+3. **Prewarm for Prefix Caching**: Always call `prewarm()` so `DecisionMaker`
+   caches the KV states of the prompt prefix.
+
+---
+
+### Laya & GLiNER2.5-Decide (Cross-Encoders)
+
+* **Models**: Laya (149M), GLiNER2.5-Decide (166M)
+* **Architecture**: Bidirectional DeBERTa/ModernBERT cross-encoders that
+  jointly attend to the input context and candidate options within a 256- or
+  512-token window.
+
+#### Best Practices for Cross-Encoders:
+
+1. **Keep Option Sets Compact When Possible**: When all candidate options and
+   the input context fit within the model's 256- or 512-token window (typically
+   8 or fewer options), `DecisionMaker` packs all options alongside the context
+   into a single encoder forward pass (~4× faster than pairwise evaluation).
+   For larger option sets or very long option descriptions, `DecisionMaker`
+   automatically falls back to evaluating options across multiple passes.
+2. **Keep Option Descriptions Concise**: Use high-signal 5–15 word descriptions
+   to save token budget for the context.
+
+## 4. Pitfalls & Code Fixes
+
+Avoid these common problems and apply the recommended fixes.
+
+### Pitfall 1: Unsplit Counterfactual or "Unless" Exceptions on Bi-Encoders
+
+**Problem**: Bi-encoders compute independent embeddings for context and options.
+When a single question contains base rules, "unless" exceptions, and
+counterfactual overrides, lexical overlap can pull the bi-encoder toward the
+wrong label.
+
+#### Solution A: Decompose into Atomic BooleanQuestions (Recommended)
+
+Because DecisionMaker embeds the input context **only once** and reuses the
+query vector across all prewarmed questions, evaluating 3 atomic boolean
+questions adds minimal additional latency over evaluating a single question.
+
+* **Avoid**:
+
+  ```devsite-click-to-copy
+  # AVOID: Single compound question with "unless" / "except" clauses on Bi-Encoders
+  bad_policy = decision_maker.BooleanQuestion(
+      condition=(
+          "The order is eligible for a refund (purchased within 30 days, UNLESS it is "
+          "a final-sale clearance item, EXCEPT when the item arrived physically damaged)."
+      )
+  )
+  ```
+* **Do Instead**:
+
+  ```devsite-click-to-copy
+  # RECOMMENDED on Bi-Encoders (EG1 / EG2): Decompose into atomic factual BooleanQuestions
+  # DecisionMaker embeds the input context ONCE and evaluates all 3 conditions with minimal overhead!
+  atomic_policy_schema = {
+      "within_30_days": decision_maker.BooleanQuestion(
+          condition="The item was purchased within the last 30 days."
+      ),
+      "is_clearance": decision_maker.BooleanQuestion(
+          condition="The item is a final-sale or clearance item."
+      ),
+      "arrived_damaged": decision_maker.BooleanQuestion(
+          condition="The item arrived physically damaged, broken, or defective."
+      ),
+  }
+  # Evaluate all conditions in a single pass
+  res = maker.evaluate_schema(order_text, atomic_policy_schema)
+  # Combine booleans deterministically in application logic
+  is_eligible = res["arrived_damaged"].value or (
+      res["within_30_days"].value and not res["is_clearance"].value
+  )
+  ```
+
+#### Solution B: Route to Gemma 4 or Cross-Encoder Models
+
+If your application accepts arbitrary, user-defined policy prompts that cannot
+be decomposed ahead of time, route evaluations to **Gemma 4** or **Laya**,
+which perform full cross-attention across rule exceptions and context.
+
+---
+
+### Pitfall 2: Double Negations and Negated Option Keys
+
+**Problem**: Negated conditions (`"is NOT ineligible"`) or keys sharing root
+words (`"not_spam"` versus `"spam"`) create semantic ambiguity.
+
+* **Avoid**:
+  `python
+  decision_maker.BooleanQuestion(condition="The user does NOT want to opt out of notifications.")
+  decision_maker.ChoiceQuestion(criteria={"not_spam": "Legitimate email", "spam": "Unsolicited email"})`
+* **Do Instead**:
+  `python
+  decision_maker.BooleanQuestion(condition="The user wants to receive notifications.")
+  decision_maker.ChoiceQuestion(
+  criteria={
+  "legitimate_inbox": "Personal, work, or transactional message expected by user.",
+  "unsolicited_spam": "Promotional bulk mail, phishing, or unwanted advertisement."
+  }
+  )`
+
+---
+
+### Pitfall 3: Bare Numeric or Code Keys Without Descriptions
+
+**Problem**: Opaque numeric keys like `"0"`, `"1"`, `"2"` with empty
+descriptions provide no semantic vector target for bi-encoders.
+
+* **Avoid**:
+  `python
+  decision_maker.ChoiceQuestion(criteria={"0": "", "1": "", "2": ""})`
+* **Do Instead**:
+  `python
+  decision_maker.ChoiceQuestion(
+  criteria={
+  "0": "No defect visible upon inspection.",
+  "1": "Minor cosmetic scratch or superficial blemish.",
+  "2": "Severe structural crack or functional failure."
+  }
+  )`
+
+  *(Note: When 3 or more numeric keys are used with descriptions,
+  DecisionMaker's compiler automatically formats them as `"title: Level 0 |
+  text: ..."` to prevent confusion with binary boolean values.)*
+
+
+
+
+
+
+Send feedback

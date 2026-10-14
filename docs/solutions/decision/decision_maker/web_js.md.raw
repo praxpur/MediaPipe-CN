@@ -1,0 +1,302 @@
+* [Home](https://developers.google.com/)
+* [Products](https://developers.google.com/products)
+* [Google AI Edge](https://developers.google.com/edge)
+* [MediaPipe](https://developers.google.com/edge/mediapipe/solutions/guide)
+
+Send feedback
+
+# Decision maker guide for web Stay organized with collections Save and categorize content based on your preferences.
+
+
+
+The MediaPipe Decision Maker task Web SDK enables high-performance on-device decision
+evaluation in web browsers using WebAssembly (Wasm) and WebGPU acceleration.
+
+For more information about the capabilities, models, and configuration options
+of this task, see the [Overview](https://developers.google.com/edge/mediapipe/solutions/decision/decision_maker/index).
+
+## Code example
+
+The TypeScript SDK (`DecisionMaker`) supports both direct per-question calls
+(`evaluateBoolean`, `evaluateChoice`, `evaluateScore`, plus `*Batch` variants)
+and multi-question `ClassifierSchema` workflows (`prewarm`, `evaluate`,
+`classify`), while streaming `.litertlm` / `.tflite` weights directly into
+16-byte aligned Wasm linear memory.
+
+To define the schema and load the fileset, configure a `ClassifierSchema` object
+defining the context prompt and list of typed decision questions (`choice`,
+`boolean`, `score`):
+
+```devsite-click-to-copy
+import {
+  DecisionMaker,
+  ClassifierSchema,
+} from '@mediapipe/tasks-decision';
+import { FilesetResolver } from '@mediapipe/tasks-decision/fileset_resolver';
+
+const triageSchema: ClassifierSchema = {
+  context: 'Customer support router for a mobile banking app.',
+  questions: [
+    {
+      id: 'department',
+      type: 'choice',
+      prompt: 'Which department should handle this message?',
+      normalizePrior: true,
+      options: [
+        {label: 'fraud', description: 'Unauthorized transactions or stolen card.'},
+        {label: 'transfers', description: 'Wire transfer delays or ACH limits.'},
+        {label: 'general', description: 'Branch hours, settings, or general FAQ.'},
+      ],
+    },
+    {
+      id: 'requires_human',
+      type: 'boolean',
+      prompt: 'The issue involves stolen funds or immediate financial risk.',
+      threshold: 0.5,
+      normalizePrior: true,
+    },
+    {
+      id: 'severity',
+      type: 'score',
+      prompt: 'Rate the severity of the customer issue from 1 to 3.',
+      options: [
+        {label: '1', description: 'Low: Routine informational question'},
+        {label: '2', description: 'Medium: Feature blocked or delayed transaction'},
+        {label: '3', description: 'High: Active account compromise or financial loss'},
+      ],
+    },
+  ],
+};
+
+async function runWebDecisionDemo(wasmFileset: WasmFileset) {
+  // 1. Create DecisionMaker (streams model into 16-byte aligned Wasm heap + WebGPU)
+  const decisionMaker = await DecisionMaker.createFromOptions(wasmFileset, {
+    baseOptions: {
+      modelAssetPath: '/models/embeddinggemma-2-270m-it.litertlm',
+    },
+    maxNumTokens: 256,
+    schema: triageSchema,
+  });
+
+  // 2. Prewarm schema once
+  await decisionMaker.prewarm(triageSchema);
+
+  // 3a. Evaluate entire schema in one call with classify() or evaluate()
+  const result = await decisionMaker.classify(
+    'Someone just charged $1,400 to my debit card in another country!'
+  );
+  console.log('Department:', result['department'].label, result['department'].probabilities);
+  console.log('Escalate:', result['requires_human'].label, result['requires_human'].probability);
+  console.log('Expected Severity (1..3):', result['severity'].expectedScore);
+
+  // 3b. Or call primitive methods directly
+  const boolRes = await decisionMaker.evaluateBoolean(
+    'Please cancel my subscription immediately.',
+    {condition: 'The user wants to cancel their subscription.', threshold: 0.5}
+  );
+  console.log('Cancel:', boolRes.value, boolRes.probabilityTrue);
+
+  decisionMaker.close();
+}
+```
+
+## Setup
+
+This section describes key steps for setting up your development environment and
+code projects specifically to use Decision Maker. For general information on
+setting up your development environment for using MediaPipe tasks, including
+platform version requirements, see the [Setup guide for
+web](/edge/mediapipe/solutions/setup_web).
+
+### JavaScript packages
+
+Decision Maker code is available through the MediaPipe
+`@mediapipe/tasks-decision` [NPM](https://www.npmjs.com/search?q=%40mediapipe)
+package. You can find and download these libraries from links provided in the
+platform [Setup guide](/edge/mediapipe/solutions/setup_web#downloads).
+
+You can install the required packages with the following code for local staging
+using the following command:
+
+```devsite-click-to-copy
+npm install @mediapipe/tasks-decision
+```
+
+### Module imports
+
+Import required modules in TypeScript/JavaScript:
+
+```devsite-click-to-copy
+import {
+  DecisionMaker,
+  FilesetResolver,
+  ChoiceQuestion,
+  BooleanQuestion
+} from '@mediapipe/tasks-decision';
+```
+
+### Model
+
+The MediaPipe Decision Maker task requires a trained model that is compatible with this
+task. For more information on available trained models for Decision Maker, see
+the task overview [Models section](https://developers.google.com/edge/mediapipe/solutions/decision/decision_maker/index#models).
+
+Select and download a model, and then store it within your project directory.
+Fetch the Wasm assets and model binaries:
+
+```devsite-click-to-copy
+const decision = await FilesetResolver.forDecisionTasks(
+  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-decision/wasm'
+);
+```
+
+## Create the task
+
+Initialize the task with WebGPU or Wasm delegate:
+
+```devsite-click-to-copy
+const decisionMaker = await DecisionMaker.createFromOptions(decision, {
+  baseOptions: {
+    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/decision_maker/embeddinggemma-2-270m-it.litertlm',
+    delegate: 'GPU'
+  },
+  maxNumTokens: 512
+});
+```
+
+### Prewarm options
+
+Prewarm candidate choices before entering interactive loops:
+
+```devsite-click-to-copy
+const categoryQuestion: ChoiceQuestion = {
+  instructions: "Categorize support ticket",
+  criteria: {
+    "refund": "Refunds, invoice updates, billing issues",
+    "bug": "Software errors, crashes, broken UI",
+    "feature": "Feature requests and product feedback"
+  },
+  normalizePrior: true
+};
+
+await decisionMaker.prewarmChoice(categoryQuestion);
+```
+
+## Prepare data
+
+Prepare context strings or HTML Image or Canvas element representations:
+
+```devsite-click-to-copy
+const inputContext = "I need a refund for order #98212.";
+```
+
+## Run the task
+
+Execute task evaluation:
+
+```devsite-click-to-copy
+const result = await decisionMaker.evaluateChoice(inputContext, categoryQuestion);
+```
+
+## Handle and display results
+
+The following shows an example of the output data from this task:
+
+```devsite-click-to-copy
+// BooleanResult
+value: true
+probabilityTrue: 0.942
+confidence: 0.884
+
+// ChoiceResult
+selectedKey: "lights_control"
+probabilities: ["lights_control": 0.912, "thermostat": 0.051, "security_check": 0.037]
+confidence: 0.861
+
+// ScoreResult
+selectedKey: "Routine preference adjustment"
+expectedScore: 0.18
+levelProbabilities: [0.82, 0.15, 0.03]
+confidence: 0.79
+```
+
+Access the resulting decision payload:
+
+```devsite-click-to-copy
+console.log(`Selected Key: ${result.selectedKey}`);
+console.log(`Confidence: ${result.confidence}`);
+console.log(`Conformal Set: ${JSON.stringify(result.predictionSet)}`);
+```
+
+## Integration
+
+Follow these steps to integrate MediaPipe Decision Maker task into your web application.
+
+### Initialize DecisionMaker and Prewarm
+
+Assuming you have defined the schema and loaded the fileset as described in the
+[code example](#code_example), now initialize DecisionMaker and prewarm. Do
+this by streaming model weights directly into 16-byte aligned Wasm linear memory
+with WebGPU acceleration, and call `prewarm`:
+
+```devsite-click-to-copy
+async function runWebDecisionDemo(wasmFileset: WasmFileset) {
+  // Initialize DecisionMaker instance
+  const decisionMaker = await DecisionMaker.createFromOptions(wasmFileset, {
+    baseOptions: {
+      modelAssetPath: '/models/embeddinggemma-2-270m-it.litertlm'
+    },
+    maxNumTokens: 256,
+    schema: triageSchema
+  });
+
+  // Prewarm schema options in Wasm memory
+  await decisionMaker.prewarm(triageSchema);
+```
+
+### Evaluate questions
+
+Evaluate the full schema using `classify()` or invoke individual primitive
+evaluation methods:
+
+```devsite-click-to-copy
+  // 3a. Evaluate full schema in one pass
+  const result = await decisionMaker.classify(
+    'Someone just charged $1,400 to my debit card in another country!'
+  );
+
+  console.log('Department:', result['department'].label, result['department'].probabilities);
+  console.log('Escalate to Human:', result['requires_human'].label, result['requires_human'].probability);
+  console.log('Expected Severity (1..3):', result['severity'].expectedScore);
+
+  // 3b. Evaluate standalone boolean primitive
+  const boolRes = await decisionMaker.evaluateBoolean(
+    'Please cancel my subscription immediately.',
+    { condition: 'The user wants to cancel their subscription.', threshold: 0.5 }
+  );
+
+  console.log('Cancel Requested:', boolRes.value, boolRes.probabilityTrue);
+
+  // Clean up instance memory
+  decisionMaker.close();
+}
+```
+
+## API summary reference
+
+| TypeScript Method | Description |
+| --- | --- |
+| `DecisionMaker.createFromOptions(wasmFileset, options)` | Asynchronously loads Wasm module and model weights. |
+| `decisionMaker.prewarm(schema)` | Pre-embeds and whitens choice options in Wasm memory. |
+| `decisionMaker.classify(input)` | Scores input context against the prewarmed schema in a single pass. |
+| `decisionMaker.evaluateBoolean(input, question)` | Evaluates a standalone binary condition. |
+| `decisionMaker.evaluateChoice(input, question)` | Evaluates candidate choice options. |
+| `decisionMaker.evaluateScore(input, question)` | Scores an ordered rubric returning continuous expected score. |
+| `decisionMaker.close()` | Releases Wasm heap buffers and WebGPU resources. |
+
+
+
+
+
+
+Send feedback

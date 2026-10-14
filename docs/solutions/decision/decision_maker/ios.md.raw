@@ -1,0 +1,253 @@
+* [Home](https://developers.google.com/)
+* [Products](https://developers.google.com/products)
+* [Google AI Edge](https://developers.google.com/edge)
+* [MediaPipe](https://developers.google.com/edge/mediapipe/solutions/guide)
+
+Send feedback
+
+# Decision maker guide for iOS Stay organized with collections Save and categorize content based on your preferences.
+
+
+
+The MediaPipe Decision Maker task iOS API (`MediaPipeTasksDecision`) lets you define
+structured decision questions, prewarm static options, and evaluate text or
+JSON schemas in iOS and macOS applications. These instructions show you how to
+use the Decision Maker in Swift.
+
+For more information about the capabilities, models, and configuration options
+of this task, see the [Overview](https://developers.google.com/edge/mediapipe/solutions/decision/decision_maker/index).
+
+## Code example
+
+The Swift SDK (`MediaPipeTasksDecision`) provides `DecisionMakerOptions`,
+structured question types (`BooleanQuestion`, `ChoiceQuestion`,
+`ScoreQuestion`), batch evaluation (`evaluateBatch`), and built-in JSON schema
+evaluation (`prewarmJson` and `evaluateJson`):
+
+```devsite-click-to-copy
+import Foundation
+import MediaPipeTasksDecision
+
+final class OnDeviceDecisionService {
+  private let decisionMaker: DecisionMaker
+  private let intentQuestion: ChoiceQuestion
+  private let confirmQuestion: BooleanQuestion
+  private let urgencyQuestion: ScoreQuestion
+
+  init(modelPath: String) throws {
+    // 1. Configure DecisionMakerOptions (.filePath or .data, .cpu or .gpu)
+    let options = DecisionMakerOptions(
+      modelPath: modelPath,
+      maxNumTokens: 512,
+      delegate: .cpu
+    )
+    self.decisionMaker = try DecisionMaker(options: options)
+
+    // 2. Define questions & prewarm option embeddings once
+    self.intentQuestion = ChoiceQuestion(
+      options: [
+        (key: "lights_control", description: "Turn lights on, off, or dim brightness in a room."),
+        (key: "thermostat", description: "Change indoor temperature, heating, or cooling mode."),
+        (key: "security_check", description: "Check camera feed, lock doors, or arm the alarm."),
+        (key: "none", description: "General question unrelated to smart-home controls.")
+      ],
+      instructions: "Classify the user's smart-home command.",
+      normalizePrior: true
+    )
+
+    self.confirmQuestion = BooleanQuestion(
+      condition: "The command unlocks a door or disables a security system.",
+      threshold: 0.5,
+      normalizePrior: true
+    )
+
+    self.urgencyQuestion = ScoreQuestion(
+      rubric: [
+        "Routine preference adjustment",
+        "Time-sensitive household action",
+        "Immediate safety or security alert"
+      ],
+      instructions: "Rate the urgency of the command."
+    )
+
+    try self.decisionMaker.prewarm(question: self.intentQuestion)
+  }
+
+  // 3. Evaluate typed questions or multi-question JSON schemas
+  func evaluateCommand(_ text: String) throws {
+    let intent: ChoiceResult = try decisionMaker.evaluate(text: text, question: intentQuestion)
+    let confirm: BooleanResult = try decisionMaker.evaluate(text: text, question: confirmQuestion)
+    let urgency: ScoreResult = try decisionMaker.evaluate(text: text, question: urgencyQuestion)
+
+    print("Intent: \(intent.selectedKey) (confidence: \(intent.confidence))")
+    print("Needs Confirmation: \(confirm.value) (pTrue: \(confirm.probabilityTrue))")
+    print("Urgency Expected Score: \(urgency.expectedScore) (level: \(urgency.selectedKey))")
+  }
+}
+```
+
+## Installation
+
+Add `MediaPipeTasksDecision` to your project with Swift Package Manager (SwiftPM
+or SPM):
+
+```devsite-click-to-copy
+// Swift Package Manager
+.package(url: "https://github.com/google-ai-edge/mediapipe.git", branch: "master")
+```
+
+### Module imports
+
+Import the framework into your Swift file:
+
+```devsite-click-to-copy
+import MediaPipeTasksDecision
+```
+
+## Models
+
+Include the target model asset (`embeddinggemma-2-270m-it.litertlm`) in your
+Xcode project bundle.
+
+## Create the task
+
+Initialize `DecisionMaker` with `DecisionMakerOptions`:
+
+```devsite-click-to-copy
+guard let modelPath = Bundle.main.path(forResource: "embeddinggemma-2-270m-it", ofType: "litertlm") else {
+  fatalError("Model asset not found in app bundle.")
+}
+
+let options = DecisionMakerOptions(
+  modelPath: modelPath,
+  maxNumTokens: 512,
+  delegate: .cpu
+)
+
+let decisionMaker = try DecisionMaker(options: options)
+```
+
+### Prewarm options
+
+Prewarm static question definitions during initialization:
+
+```devsite-click-to-copy
+let intentQuestion = ChoiceQuestion(
+  options: [
+    (key: "billing", description: "Invoices, payment errors, refund requests"),
+    (key: "tech_support", description: "System bugs, crashes, error codes"),
+    (key: "general", description: "Other questions")
+  ],
+  instructions: "Classify incoming user message",
+  normalizePrior: true
+)
+
+try decisionMaker.prewarm(question: intentQuestion)
+```
+
+## Prepare data
+
+Specify the input text to evaluate:
+
+```devsite-click-to-copy
+let inputText = "Payment went through twice on my credit card."
+```
+
+### Configuration options
+
+This task has the following configuration options for iOS apps:
+
+| Option Name | Description | Value Type | Default Value |
+| --- | --- | --- | --- |
+| `modelSource` | The source of the model asset, specified with a path (`.filePath`) or in-memory data (`.data`). | `ModelSource` | `undefined` |
+| `maxNumTokens` | The maximum number of tokens allowed for input context processing. | `Int` | `4096` |
+| `delegate` | The hardware acceleration delegate used for running inference (`.cpu`, `.gpu`). | `Delegate` | `.cpu` |
+
+## Run the Task
+
+Execute synchronous decision evaluation:
+
+```devsite-click-to-copy
+let choiceResult = try decisionMaker.evaluate(text: inputText, question: intentQuestion)
+```
+
+## Handle and display results
+
+The following shows an example of the output data from this task:
+
+```devsite-click-to-copy
+// BooleanResult
+value: true
+probabilityTrue: 0.942
+confidence: 0.884
+
+// ChoiceResult
+selectedKey: "lights_control"
+probabilities: ["lights_control": 0.912, "thermostat": 0.051, "security_check": 0.037]
+confidence: 0.861
+
+// ScoreResult
+selectedKey: "Routine preference adjustment"
+expectedScore: 0.18
+levelProbabilities: [0.82, 0.15, 0.03]
+confidence: 0.79
+```
+
+Process the evaluated result properties:
+
+```devsite-click-to-copy
+print("Winning Category: \(choiceResult.selectedKey)")
+print("Confidence: \(choiceResult.confidence)")
+print("Probabilities: \(choiceResult.probabilities)")
+```
+
+## JSON schema evaluation in Swift
+
+Evaluate Jev JSON or OpenAI structured output schemas using `evaluateJson`:
+
+```devsite-click-to-copy
+func evaluateJsonSchema(text: String) throws {
+  let requestJson = """
+  {
+    "text": "\(text)",
+    "questions": {
+      "intent": {
+        "type": "choice",
+        "choices": ["refund", "support"],
+        "descriptions": ["Requesting a billing refund", "Technical support request"]
+      }
+    }
+  }
+  """
+
+  let resultJson = try decisionMaker.evaluateJson(requestJson)
+  print("Evaluated JSON Result: \(resultJson)")
+}
+```
+
+## API summary reference
+
+The Swift inference APIs on DecisionMaker are:
+
+* `evaluate(text:question:)` for `BooleanQuestion`, `ChoiceQuestion`, or
+  `ScoreQuestion`
+* `evaluateBatch(texts:question:sharedPrefixText:)`
+* `evaluateJson(_ jsonRequest: String)`
+
+| Swift API | Description |
+| --- | --- |
+| `DecisionMakerOptions(modelPath:maxNumTokens:delegate:)` | Options struct configuring model source (`.filePath`/`.data`) and hardware delegate (`.cpu`/`.gpu`). |
+| `DecisionMaker(options:)` | Instantiates decision engine on a serial dispatch queue. |
+| `decisionMaker.prewarm(question:)` | Pre-embeds and whitens options for a `ChoiceQuestion`. |
+| `decisionMaker.evaluate(text:question:)` | Evaluates a single `BooleanQuestion`, `ChoiceQuestion`, or `ScoreQuestion`. |
+| `decisionMaker.evaluateJson(_ jsonRequest: String)` | Evaluates a raw Jev or OpenAI JSON schema against text. |
+| `decisionMaker.close()` | Releases all resources. |
+| `decisionMaker.prewarmJson(_ jsonSchema: String)` | Pre-embeds and whitens options for a JSON schema. |
+| `decisionMaker.evaluateBatch(texts:question:sharedPrefixText:)` | Evaluates a batch of text inputs against a single question. |
+
+
+
+
+
+
+Send feedback

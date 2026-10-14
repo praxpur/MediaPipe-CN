@@ -1,0 +1,7 @@
+# Python
+__pycache__/
+*.pyc
+
+# 抓取过程的临时产物
+*.raw.md
+temp_*.md

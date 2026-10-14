@@ -1,0 +1,209 @@
+* [Home](https://developers.google.com/)
+* [Products](https://developers.google.com/products)
+* [Google AI Edge](https://developers.google.com/edge)
+* [MediaPipe](https://developers.google.com/edge/mediapipe/solutions/guide)
+
+Send feedback
+
+# Audio classification guide for web Stay organized with collections Save and categorize content based on your preferences.
+
+
+
+The MediaPipe Audio Classifier task lets you perform classification on audio data. You can
+use this task to identify sound events from a set of trained categories. These
+instructions show you how to use the Audio Classifier for Node and web apps.
+
+You can see this task in action by viewing the
+[demo](https://google-ai-edge.github.io/mediapipe-samples-web/#/audio/audio_classifier).
+For more information about the capabilities, models, and configuration options
+of this task, see the [Overview](https://developers.google.com/edge/mediapipe/solutions/audio/audio_classifier/index).
+
+## Code example
+
+The example code for Audio Classifier provides a complete implementation of this
+task in JavaScript for your reference. This code helps you test this task and
+get started on building your own audio classification app. You can view, run,
+and edit the Audio Classifier
+[example](https://stackblitz.com/github/google-ai-edge/mediapipe-samples-web?file=src%2Ftasks%2Faudio-classifier.ts)
+using just your web browser.
+
+## Setup
+
+This section describes key steps for setting up your development environment and
+code projects specifically to use Audio Classifier. For general information on
+setting up your development environment for using MediaPipe tasks, including
+platform version requirements, see the
+[Setup guide for web](/mediapipe/solutions/setup_web).
+
+### JavaScript packages
+
+Audio Classifier code is available through the MediaPipe `@mediapipe/tasks-audio`
+[NPM](https://www.npmjs.com/search?q=%40mediapipe) package. You can
+find and download these libraries from links provided in the platform
+[Setup guide](/mediapipe/solutions/setup_web#downloads).
+
+You can install the required packages with the following code for local staging
+using the following command:
+
+```devsite-click-to-copy
+npm install @mediapipe/tasks-audio
+```
+
+If you want to import the task code through a content delivery network (CDN)
+service, add the following code in the  tag in your HTML file:
+
+```devsite-click-to-copy
+<!-- Replace "my-cdn-service.com" with your CDN -->
+<head>
+  <script src="https://my-cdn-service.com/npm/@mediapipe/tasks-audio/audio_bundle.js"
+    crossorigin="anonymous"></script>
+</head>
+```
+
+### Model
+
+The MediaPipe Audio Classifier task requires a trained model that is compatible with this
+task. For more information on available trained models for Audio Classifier, see
+the task overview [Models section](https://developers.google.com/edge/mediapipe/solutions/audio/audio_classifier/index#models).
+
+Select and download a model, and then store it within your project directory,
+for example:
+
+```devsite-click-to-copy
+<dev-project-root>/app/shared/models/
+```
+
+## Create the task
+
+Use one of the Audio Classifier `createFrom...()` functions to
+prepare the task for running inferences. Use the `createFromModelPath()`
+function with a relative or absolute path to the trained model file.
+If your model is already loaded into memory, you can use the
+`createFromModelBuffer()` method.
+
+The code example below demonstrates using the `createFromOptions()` function to
+set up the task. The `createFromOptions` function allows you to customize the
+Audio Classifier with configuration options. For more information on configuration
+options, see [Configuration options](#configuration_options).
+
+The following code demonstrates how to build and configure the task with custom
+options:
+
+```devsite-click-to-copy
+const audio = await FilesetResolver.forAudioTasks(
+    "https://my-cdn-service.com/npm/@mediapipe/tasks-audio/wasm"
+  );
+
+const audioClassifier = await AudioClassifier.createFromOptions(audio, {
+    baseOptions: {
+      modelAssetPath:
+        "https://tfhub.dev/google/lite-model/yamnet/classification/tflite/1?lite-format=tflite"
+    }
+  });
+```
+
+You a see a full example at
+[`example code`](https://github.com/google-ai-edge/mediapipe-samples-web/blob/main/src/workers/audio-classifier.worker.ts).
+
+### Configuration options
+
+This task has the following configuration options for Web and JavaScript
+applications:
+
+| Option Name | Description | Value Range | Default Value |
+| --- | --- | --- | --- |
+| `displayNamesLocale` | Sets the language of labels to use for display names provided in the metadata of the task's model, if available. Default is `en` for English. You can add localized labels to the metadata of a custom model using the [TensorFlow Lite Metadata Writer API](https://ai.google.dev/edge/lite/models/metadata_writer_tutorial#audio_classifiers). | Locale code | en |
+| `maxResults` | Sets the optional maximum number of top-scored classification results to return. If < 0, all available results will be returned. | Any positive numbers | `-1` |
+| `scoreThreshold` | Sets the prediction score threshold that overrides the one provided in the model metadata (if any). Results below this value are rejected. | [0.0, 1.0] | Not set |
+| `categoryAllowlist` | Sets the optional list of allowed category names. If non-empty, classification results whose category name is not in this set will be filtered out. Duplicate or unknown category names are ignored. This option is mutually exclusive with `categoryDenylist` and using both results in an error. | Any strings | Not set |
+| `categoryDenylist` | Sets the optional list of category names that are not allowed. If non-empty, classification results whose category name is in this set will be filtered out. Duplicate or unknown category names are ignored. This option is mutually exclusive with `categoryAllowlist` and using both results in an error. | Any strings | Not set |
+
+## Prepare data
+
+Audio Classifier works with audio clips and audio streams, and can work with audio
+files in any format supported by the host browser. The task handles the data
+input preprocessing, including resampling, buffering, and framing.
+
+## Run the task
+
+The Audio Classifier uses the `classify()` method to run inferences for audio clip
+files or audio streams. The Audio Classifier API returns the possible
+categories for audio events recognized in the input audio.
+
+Calls to the Audio Classifier `classify()` method run synchronously and blocks the
+user interface thread. If you classify audio from a device's microphone,
+each classification will block the main thread. You can prevent this by
+implementing web workers to run `classify()` on another thread.
+
+The following code demonstrates how to execute the processing with the task model:
+
+### Audio clips
+
+```devsite-click-to-copy
+// Create audio buffer
+const sample = await response.arrayBuffer();
+const audioBuffer = await audioCtx.decodeAudioData(sample);
+
+// Use AudioClassifier to run classification
+const results = audioClassifier.classify(
+  audioBuffer.getChannelData(0),
+  audioBuffer.sampleRate
+);
+```
+
+### Audio stream
+
+```devsite-click-to-copy
+stream = await navigator.mediaDevices.getUserMedia(constraints);
+audioCtx = new AudioContext({ sampleRate: 16000 });
+
+const source = audioCtx.createMediaStreamSource(stream);
+const scriptNode = audioCtx.createScriptProcessor(16384, 1, 1);
+
+scriptNode.onaudioprocess = function (audioProcessingEvent) {
+  const inputBuffer = audioProcessingEvent.inputBuffer;
+  let inputData = inputBuffer.getChannelData(0);
+
+  // Classify the audio
+  const result = audioClassifier.classify(inputData);
+  const categories = result[0].classifications[0].categories;
+};
+```
+
+For a more complete implementation of running an Audio Classifier task, see the
+[example](https://github.com/google-ai-edge/mediapipe-samples-web/blob/main/src/workers/audio-classifier.worker.ts).
+
+## Handle and display results
+
+Once you complete an inference run, the Audio Classifier task returns an
+`AudioClassifierResult` object which contains the list of possible categories
+for the objects within the input audio.
+
+```devsite-click-to-copy
+AudioClassifierResult:
+  Timestamp in microseconds: 100
+  ClassificationResult #0:
+    Timestamp in microseconds: 100  
+    Classifications #0 (single classification head):
+      head index: 0
+      category #0:
+        category name: "Speech"
+        score: 0.6
+        index: 0
+      category #1:
+        category name: "Music"
+        score: 0.2
+        index: 1
+```
+
+The Audio Classifier example code demonstrates how to display the classification
+results returned from the task, see the
+[example](https://github.com/google-ai-edge/mediapipe-samples-web/blob/main/src/tasks/audio-classifier.ts)
+for details.
+
+
+
+
+
+
+Send feedback
