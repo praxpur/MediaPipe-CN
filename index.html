@@ -8,6 +8,7 @@
 </head>
 <body>
   <header class="topbar">
+    <button class="menu-button" id="menu-button" type="button" aria-controls="sidebar" aria-expanded="false">☰ <span>目录</span></button>
     <a class="logo" href="#">
       <span class="dot"></span>
       <span>MediaPipe 中文文档镜像</span>
@@ -16,8 +17,10 @@
     <span class="crumb" id="crumb"></span>
   </header>
 
-  <aside class="sidebar" id="sidebar">
-    <input type="search" class="searchbox" id="search" placeholder="搜索文档…">
+  <button class="nav-backdrop" id="nav-backdrop" type="button" aria-label="关闭目录" tabindex="-1" hidden></button>
+  <aside class="sidebar" id="sidebar" aria-label="章节目录">
+    <div class="sidebar-heading"><strong>章节目录</strong><button class="close-menu" id="close-menu" type="button" aria-label="关闭目录">×</button></div>
+    <input type="search" class="searchbox" id="search" aria-label="搜索章节" placeholder="搜索章节…">
   </aside>
 
   <main class="main" id="main">

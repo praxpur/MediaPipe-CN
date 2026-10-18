@@ -210,6 +210,41 @@
   var mainEl = document.getElementById("main");
   var crumbEl = document.getElementById("crumb");
   var searchEl = document.getElementById("search");
+  var menuButton = document.getElementById("menu-button");
+  var closeMenu = document.getElementById("close-menu");
+  var backdrop = document.getElementById("nav-backdrop");
+  var mobileLayout = window.matchMedia("(max-width: 900px)");
+  var menuOpen = false;
+
+  function setMenuOpen(open, restoreFocus) {
+    menuOpen = mobileLayout.matches && open;
+    document.body.classList.toggle("nav-open", menuOpen);
+    menuButton.setAttribute("aria-expanded", String(menuOpen));
+    backdrop.hidden = !menuOpen;
+    sidebarEl.inert = mobileLayout.matches && !menuOpen;
+    mainEl.inert = menuOpen;
+    if (menuOpen) {
+      closeMenu.focus();
+      var active = sidebarEl.querySelector(".nav-item.active");
+      if (active) active.scrollIntoView({ block: "center" });
+    } else if (restoreFocus) menuButton.focus();
+  }
+  menuButton.addEventListener("click", function () { setMenuOpen(!menuOpen, menuOpen); });
+  closeMenu.addEventListener("click", function () { setMenuOpen(false, true); });
+  backdrop.addEventListener("click", function () { setMenuOpen(false, true); });
+  mobileLayout.addEventListener("change", function () { setMenuOpen(false, false); });
+  document.addEventListener("keydown", function (e) {
+    if (!menuOpen) return;
+    if (e.key === "Escape") { e.preventDefault(); setMenuOpen(false, true); }
+    if (e.key !== "Tab") return;
+    var controls = [menuButton].concat(Array.from(sidebarEl.querySelectorAll("a[href], button, input")).filter(function (el) {
+      return el.getClientRects().length > 0;
+    }));
+    var first = controls[0], last = controls[controls.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  setMenuOpen(false, false);
 
   /* ---------- 工具函数 ---------- */
   function esc(s) {
@@ -469,6 +504,7 @@
   /* ---------- 导航渲染 ---------- */
   function buildNav() {
     var wrap = document.createElement("div");
+    wrap.className = "nav-tree";
     NAV.forEach(function (g) {
       var gh = document.createElement("div");
       gh.className = "nav-group";
@@ -481,6 +517,7 @@
     sidebarEl.appendChild(wrap);
   }
 
+  var navBranchId = 0;
   function navItemEl(item, depth) {
     var holder = document.createElement("div");
     holder.className = "nav-section";
@@ -498,15 +535,32 @@
     var a = document.createElement("a");
     a.className = "nav-item" + (item.children ? "" : " nav-leaf");
     a.setAttribute("data-file", item.file);
+    a.href = "#" + item.file;
     a.textContent = item.label;
     a.addEventListener("click", function (e) {
       location.hash = "#" + item.file;
       e.preventDefault();
+      if (mobileLayout.matches) setMenuOpen(false, true);
     });
-    holder.appendChild(a);
+    var row = document.createElement("div");
+    row.className = "nav-row";
+    row.appendChild(a);
+    holder.appendChild(row);
     if (item.children && item.children.length) {
       var box = document.createElement("div");
       box.className = "nav-children";
+      box.id = "nav-branch-" + (++navBranchId);
+      var toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "nav-toggle";
+      toggle.setAttribute("aria-label", "展开或收起“" + item.label + "”子章节");
+      toggle.setAttribute("aria-controls", box.id);
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.addEventListener("click", function () {
+        var open = box.classList.toggle("open");
+        toggle.setAttribute("aria-expanded", String(open));
+      });
+      row.appendChild(toggle);
       item.children.forEach(function (c) {
         box.appendChild(navItemEl(c, depth + 1));
       });
@@ -527,9 +581,11 @@
         var p = n.parentElement;
         while (p && p !== sidebarEl) {
           if (p.classList && p.classList.contains("nav-section")) {
-            var prev = p.previousElementSibling;
             var ch = p.querySelector(":scope > .nav-children");
-            if (ch) ch.classList.add("open");
+            if (ch) {
+              ch.classList.add("open");
+              p.querySelector(":scope > .nav-row > .nav-toggle").setAttribute("aria-expanded", "true");
+            }
           }
           p = p.parentElement;
         }
@@ -537,37 +593,42 @@
     });
   }
 
-  /* 展开/收起 */
-  sidebarEl.addEventListener("click", function (e) {
-    var t = e.target;
-    if (t.classList && t.classList.contains("nav-item") && t.nextElementSibling &&
-        t.nextElementSibling.classList.contains("nav-children")) {
-      t.nextElementSibling.classList.toggle("open");
-    }
-  });
-
   /* 搜索过滤 */
+  var savedBranches = null;
   searchEl.addEventListener("input", function () {
     var q = searchEl.value.trim().toLowerCase();
-    collectNav().forEach(function (n) {
-      var text = n.textContent.toLowerCase();
-      var show = !q || text.indexOf(q) >= 0;
-      n.style.display = show ? "" : "none";
-      var parent = n.parentElement;
-      while (parent && parent !== sidebarEl) {
-        if (parent.classList && parent.classList.contains("nav-section")) {
-          var cards = parent.querySelectorAll(".nav-item[data-file]");
-          var anyVisible = Array.prototype.some.call(cards, function (c) { return c.style.display !== "none"; });
-          parent.style.display = anyVisible ? "" : "none";
-        }
-        parent = parent.parentElement;
+    var branches = Array.from(sidebarEl.querySelectorAll(".nav-children"));
+    if (q && !savedBranches) savedBranches = branches.map(function (box) { return box.classList.contains("open"); });
+    function filterSection(section, ancestorMatches) {
+      var row = section.querySelector(":scope > .nav-row");
+      var link = row && row.querySelector(".nav-item");
+      var label = link || section.querySelector(":scope > .nav-group");
+      var ownMatch = !!label && label.textContent.toLowerCase().indexOf(q) >= 0;
+      var matches = !q || ancestorMatches || ownMatch;
+      var children = section.querySelector(":scope > .nav-children");
+      var anyChild = false;
+      var childSections = Array.from((children || section).children).filter(function (child) { return child.classList.contains("nav-section"); });
+      childSections.forEach(function (child) {
+          if (filterSection(child, matches)) anyChild = true;
+      });
+      if (children) {
+        if (q) children.classList.toggle("open", anyChild);
+        else if (savedBranches) children.classList.toggle("open", savedBranches[branches.indexOf(children)]);
+        row.querySelector(".nav-toggle").setAttribute("aria-expanded", String(children.classList.contains("open")));
       }
+      section.hidden = !(matches || anyChild);
+      return !section.hidden;
+    }
+    sidebarEl.querySelectorAll(".nav-tree > .nav-section").forEach(function (section) {
+      filterSection(section, false);
     });
+    if (!q) { savedBranches = null; highlightNav(currentFile()); }
   });
 
   /* ---------- 启动 ---------- */
   buildNav();
   window.addEventListener("hashchange", function () {
+    if (menuOpen) setMenuOpen(false, true);
     var f = currentFile();
     if (f) loadDoc(f, currentAnchor()); else renderHome();
   });
