@@ -1,5 +1,7 @@
 # MediaPipe 中文文档镜像
 
+**在线阅读：[MediaPipe 中文文档站](https://praxpur.github.io/MediaPipe-CN/)**（支持手机与电脑浏览）
+
 本项目将 Google AI Edge 官方 **MediaPipe 文档**(<https://developers.google.com/edge/mediapipe/solutions/guide>)完整翻译为简体中文 Markdown,供离线阅读与学习使用,可作为科创竞赛/课程论文的参考资料。
 
 ## 内容
